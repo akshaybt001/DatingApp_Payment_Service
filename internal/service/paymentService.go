@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"crypto/tls"
+	"log"
 	"net/http"
 	"os"
 	"time"
@@ -10,6 +11,7 @@ import (
 	"github.com/akshaybt001/DatingApp_Payment_Service/entities"
 	"github.com/akshaybt001/DatingApp_Payment_Service/helperstruct"
 	"github.com/akshaybt001/DatingApp_Payment_Service/internal/helper"
+	"github.com/akshaybt001/DatingApp_Payment_Service/kafka"
 	"github.com/akshaybt001/DatingApp_Payment_Service/usecase"
 	"github.com/akshaybt001/DatingApp_proto_files/pb"
 	"github.com/gin-gonic/gin"
@@ -64,24 +66,24 @@ func (p *PaymentService) subscriptionPayment(c *gin.Context) {
 		"currency": "INR",
 		"receipt":  "test_receipt_id",
 	}
-	http.DefaultTransport.(*http.Transport).TLSClientConfig=&tls.Config{InsecureSkipVerify:true}
-	body,err:=client.Order.Create(data,nil)
-	if err!=nil{
-		c.JSON(http.StatusBadRequest,helperstruct.Response{
+	http.DefaultTransport.(*http.Transport).TLSClientConfig = &tls.Config{InsecureSkipVerify: true}
+	body, err := client.Order.Create(data, nil)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, helperstruct.Response{
 			StatusCode: 400,
-			Message: "error creating razorpay client",
-			Error: err.Error(),
+			Message:    "error creating razorpay client",
+			Error:      err.Error(),
 		})
 		return
 	}
-	value:=body["id"]
-	razorPayId:=value.(string)
-	c.HTML(200,"payment.html",gin.H{
-		"total_amount":planInfo.Amount,
-		"total":planInfo.Amount,
-		"orderid":razorPayId,
-		"plan_id":subId,
-		"userId":userId,
+	value := body["id"]
+	razorPayId := value.(string)
+	c.HTML(200, "payment.html", gin.H{
+		"total_amount": planInfo.Amount,
+		"total":        planInfo.Amount,
+		"orderid":      razorPayId,
+		"plan_id":      subId,
+		"userId":       userId,
 	})
 }
 
@@ -141,7 +143,22 @@ func (p *PaymentService) verifyPayment(c *gin.Context) {
 		})
 		return
 	}
-	
+	userData, err := p.UserConn.GetUser(context.Background(), &pb.GetUserById{
+		Id: userId,
+	})
+	if err!=nil{
+		log.Print("error retrieving user info")
+		c.JSON(http.StatusBadRequest,helperstruct.Response{
+			StatusCode: 400,
+			Message: "error while retrieving user info",
+			Error: err.Error(),
+		})
+		return
+	}
+	if err:=kafka.SubscribedMessage(userData.Email,plan.Duration);err!=nil{
+		log.Print("error while sending message ",err)
+	}
+
 	c.JSON(http.StatusOK, helperstruct.Response{
 		StatusCode: 200,
 		Message:    "payment verified",
@@ -154,31 +171,31 @@ func (p *PaymentService) servePaymentSuccessPage(c *gin.Context) {
 	c.HTML(200, "paymentVerified.html", gin.H{})
 }
 
-func (p *PaymentService) addSubscriptionPlan(c *gin.Context){
+func (p *PaymentService) addSubscriptionPlan(c *gin.Context) {
 	var req entities.Subscription
-	err:=c.BindJSON(&req)
-	if err!=nil{
-		c.JSON(http.StatusBadRequest,helperstruct.Response{
+	err := c.BindJSON(&req)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, helperstruct.Response{
 			StatusCode: 400,
-			Message: "please provide valid subscriprion plan",
-			Error: err.Error(),
-		})
-		return 
-	}
-	if !helper.IsValidDuration(req.Duration){
-		c.JSON(http.StatusBadRequest,helperstruct.Response{
-			StatusCode: 400,
-			Message: "invalid duration",
-			Error: "please enter a valid duration",
+			Message:    "please provide valid subscriprion plan",
+			Error:      err.Error(),
 		})
 		return
 	}
-	check,err:=p.usecases.GetSubscriptionByDuration(req.Duration)
-	if err!=nil{
-		c.JSON(http.StatusBadRequest,helperstruct.Response{
+	if !helper.IsValidDuration(req.Duration) {
+		c.JSON(http.StatusBadRequest, helperstruct.Response{
 			StatusCode: 400,
-			Message: "error adding subscription plan",
-			Error: err.Error(),
+			Message:    "invalid duration",
+			Error:      "please enter a valid duration",
+		})
+		return
+	}
+	check, err := p.usecases.GetSubscriptionByDuration(req.Duration)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, helperstruct.Response{
+			StatusCode: 400,
+			Message:    "error adding subscription plan",
+			Error:      err.Error(),
 		})
 		return
 	}
@@ -198,19 +215,19 @@ func (p *PaymentService) addSubscriptionPlan(c *gin.Context){
 		})
 		return
 	}
-	if err:=p.usecases.AddSubscriptionPlan(req);err!=nil{
-		c.JSON(http.StatusBadRequest,helperstruct.Response{
+	if err := p.usecases.AddSubscriptionPlan(req); err != nil {
+		c.JSON(http.StatusBadRequest, helperstruct.Response{
 			StatusCode: 400,
-			Message: "error while adding subscripation plan",
-			Error: err.Error(),
+			Message:    "error while adding subscripation plan",
+			Error:      err.Error(),
 		})
 		return
 	}
-	c.JSON(http.StatusOK,helperstruct.Response{
+	c.JSON(http.StatusOK, helperstruct.Response{
 		StatusCode: 200,
-		Message: "plan added successfully",
+		Message:    "plan added successfully",
 	})
-	
+
 }
 func (p *PaymentService) updateSubscriptionPlan(c *gin.Context) {
 	var req entities.Subscription
